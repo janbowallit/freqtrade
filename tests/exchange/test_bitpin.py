@@ -428,6 +428,12 @@ def test_parse_trading_fees(api):
     [
         (401, {"detail": "x", "code": "token_not_valid"}, "/odr/orders/", BitpinTokenInvalid),
         (401, {"detail": "ip not allowed"}, "/wlt/wallets/", ccxt.AuthenticationError),
+        (
+            406,
+            {"code": "api_credential_wrong", "detail": "x"},
+            "/usr/authenticate/",
+            ccxt.AuthenticationError,
+        ),
         (403, {"detail": "x"}, "/wlt/wallets/", ccxt.PermissionDenied),
         (429, {"detail": "x"}, "/mkt/tickers/", ccxt.RateLimitExceeded),
         (404, {"detail": "Not found."}, "/odr/orders/1/", ccxt.OrderNotFound),
