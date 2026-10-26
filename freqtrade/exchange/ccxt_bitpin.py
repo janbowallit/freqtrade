@@ -247,8 +247,9 @@ class BitpinBase(_MixinBase):
         error_code = self.safe_string(response, "code") if isinstance(response, dict) else None
         if error_code == "token_not_valid":
             raise BitpinTokenInvalid(message)
-        if code == 401 or error_code == "api_credential_wrong":
-            # Wrong key/secret or IP not whitelisted (returned as 406 by usr/authenticate)
+        if code == 401 or error_code == "api_credential_wrong" or (code == 406 and "/usr/" in url):
+            # Wrong key/secret or IP not whitelisted - usr/authenticate answers these with 406,
+            # e.g. {"code": "api_credential_wrong", ...} or {"detail": "wrong ip 1.2.3.4"}
             raise AuthenticationError(message)
         if code == 403:
             raise PermissionDenied(message)

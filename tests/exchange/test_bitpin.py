@@ -434,6 +434,7 @@ def test_parse_trading_fees(api):
             "/usr/authenticate/",
             ccxt.AuthenticationError,
         ),
+        (406, {"detail": "wrong ip 1.2.3.4"}, "/usr/authenticate/", ccxt.AuthenticationError),
         (403, {"detail": "x"}, "/wlt/wallets/", ccxt.PermissionDenied),
         (429, {"detail": "x"}, "/mkt/tickers/", ccxt.RateLimitExceeded),
         (404, {"detail": "Not found."}, "/odr/orders/1/", ccxt.OrderNotFound),
