@@ -523,6 +523,27 @@ If your account is required to use an operatorId, you can set it in the configur
 
 Bitvavo expects the `operatorId` to be an integer.
 
+## Bitpin
+
+Bitpin is not part of ccxt - freqtrade ships its own ccxt-compatible implementation (`freqtrade/exchange/ccxt_bitpin.py`).
+Spot trading on both `IRT` (Toman) and `USDT` markets is supported.
+
+``` json
+"exchange": {
+    "name": "bitpin",
+    "key": "your_api_key",
+    "secret": "your_secret_key",
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT"]
+}
+```
+
+* API keys are bound to a list of IP addresses (configured when creating the key on Bitpin) - the bot must run from one of these IPs.
+* Authentication uses short-lived access tokens (15 minutes), which are created and refreshed automatically. Bitpin limits token creation to 200 requests per day - avoid restarting the bot in a tight loop.
+* Tickers contain neither bid/ask nor volume. Use `"use_order_book": true` in `entry_pricing` / `exit_pricing`, and a pairlist which does not rely on volume (e.g. `StaticPairList`).
+* Order queries are limited to 80 requests per minute. Keep the number of pairs and open orders low.
+* Default fees of 0.3% (maker) / 0.4% (taker) are assumed for dry-run. Set `"fee"` in the configuration to match your account's fee tier.
+* The API host defaults to `api.bitpin.org`. Use `"ccxt_config": {"hostname": "api.bitpin.ir"}` to switch hosts.
+
 ## All exchanges
 
 Should you experience constant errors with Nonce (like `InvalidNonce`), it is best to regenerate the API keys. Resetting Nonce is difficult and it's usually easier to regenerate the API keys.
