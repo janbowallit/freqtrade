@@ -43,6 +43,14 @@ logger = logging.getLogger(__name__)
 # Refresh the access token this many seconds before it expires.
 TOKEN_EXPIRY_MARGIN = 60
 
+# Bitpin aligns candles above 30m to Tehran time (UTC+3:30), e.g. 1h candles open at hh:30 UTC.
+# Freqtrade expects UTC-aligned candles - so larger timeframes are built from 30m candles,
+# which are UTC-aligned.
+OHLCV_BASE_TIMEFRAME = "30m"
+OHLCV_BASE_SECONDS = 30 * 60
+# Maximum number of candles Bitpin returns per request.
+OHLCV_MAX_CANDLES = 10000
+
 # Tokens are shared between the sync and async instances (and across instances using the
 # same key), as Bitpin only allows 200 token requests per day.
 _TOKEN_CACHE: dict[str, dict[str, Any]] = {}
@@ -136,8 +144,6 @@ class BitpinBase(_MixinBase):
                     "4h": "4h",
                     "6h": "6h",
                     "1d": "1d",
-                    "1w": "1w",
-                    "1M": "1M",
                 },
                 "urls": {
                     "api": {
@@ -277,23 +283,51 @@ class BitpinBase(_MixinBase):
 
     def _ohlcv_request(self, market, timeframe, since, limit, params) -> dict[str, Any]:
         duration = self.parse_timeframe(timeframe)
+        resolution = timeframe if duration <= OHLCV_BASE_SECONDS else OHLCV_BASE_TIMEFRAME
+        base_duration = min(duration, OHLCV_BASE_SECONDS)
         if limit is None:
             limit = self.safe_integer(self.options, "fetchOHLCVLimit", 1000)
+        limit = min(limit, OHLCV_MAX_CANDLES * base_duration // duration)
         until = self.safe_integer(params, "until")
         if since is not None:
-            start = since // 1000
+            start = since // 1000 // duration * duration
             end = start + duration * limit - 1
             if until is not None:
                 end = min(end, until // 1000)
         else:
             end = until // 1000 if until is not None else self.seconds()
-            start = end - duration * limit
+            start = (end // duration - limit + 1) * duration
         return {
             "symbol": market["id"],
-            "res": self.safe_string(self.timeframes, timeframe, timeframe),
+            "res": self.safe_string(self.timeframes, resolution, resolution),
             "from": start,
             "to": end,
         }
+
+    def _parse_ohlcv_response(self, response, market, timeframe, since, limit) -> list:
+        duration_ms = self.parse_timeframe(timeframe) * 1000
+        if duration_ms <= OHLCV_BASE_SECONDS * 1000:
+            return self.parse_ohlcvs(response, market, timeframe, since, limit)
+        candles = self.parse_ohlcvs(response, market, OHLCV_BASE_TIMEFRAME)
+        return self.filter_by_since_limit(
+            self._aggregate_ohlcv(candles, duration_ms), since, limit, 0
+        )
+
+    @staticmethod
+    def _aggregate_ohlcv(candles: list, duration_ms: int) -> list:
+        """Combine sorted base candles into UTC-aligned candles of duration_ms."""
+        result: list = []
+        for ts, open_, high, low, close, volume in candles:
+            bucket = ts - ts % duration_ms
+            if result and result[-1][0] == bucket:
+                last = result[-1]
+                last[2] = max(last[2], high)
+                last[3] = min(last[3], low)
+                last[4] = close
+                last[5] = (last[5] or 0) + (volume or 0)
+            else:
+                result.append([bucket, open_, high, low, close, volume])
+        return result
 
     def _create_order_request(self, market, type, side, amount, price, params) -> dict[str, Any]:
         request: dict[str, Any] = {
@@ -671,7 +705,7 @@ class bitpin(BitpinBase, ccxt.Exchange):
         market = self.market(symbol)
         request = self._ohlcv_request(market, timeframe, since, limit, params)
         response = self.public_get_mkt_candles(self.extend(request, self.omit(params, "until")))
-        return self.parse_ohlcvs(response, market, timeframe, since, limit)
+        return self._parse_ohlcv_response(response, market, timeframe, since, limit)
 
     def fetch_balance(self, params={}):
         self.load_markets()
@@ -812,7 +846,7 @@ class bitpin_async(BitpinBase, ccxt_async.Exchange):
         response = await self.public_get_mkt_candles(
             self.extend(request, self.omit(params, "until"))
         )
-        return self.parse_ohlcvs(response, market, timeframe, since, limit)
+        return self._parse_ohlcv_response(response, market, timeframe, since, limit)
 
     async def fetch_balance(self, params={}):
         await self.load_markets()

@@ -25,6 +25,8 @@ class Bitpin(Exchange):
 
     _ft_has: FtHas = {
         "ohlcv_candle_limit": 1000,
+        # Candles above 30m are built from 30m candles - max. 10000 of those per request
+        "ohlcv_candle_limit_per_timeframe": {"6h": 800, "1d": 200},
         # Orderbook endpoint always returns 20 levels
         "l2_limit_range": [20],
         # Tickers only contain the last price - no bid/ask or volume

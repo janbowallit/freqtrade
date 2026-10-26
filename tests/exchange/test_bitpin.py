@@ -111,35 +111,63 @@ def test_parse_datetime():
 def test_ohlcv_request(api, time_machine):
     time_machine.move_to("2025-01-01 00:00:00 +00:00", tick=False)
     market = api.market("BTC/USDT")
+    # Timeframes above 30m are requested as 30m candles
     req = api._ohlcv_request(market, "1h", 1735689600000, 10, {})
-    assert req == {"symbol": "BTC_USDT", "res": "1h", "from": 1735689600, "to": 1735725599}
+    assert req == {"symbol": "BTC_USDT", "res": "30m", "from": 1735689600, "to": 1735725599}
+    # since is aligned down to the timeframe
+    req = api._ohlcv_request(market, "1h", 1735689600000 + 600_000, 10, {})
+    assert req["from"] == 1735689600
+    # Limit is capped to what fits into 10000 30m candles
+    req = api._ohlcv_request(market, "1d", 1735689600000, 1000, {})
+    assert req["to"] - req["from"] + 1 == 208 * 86400
     req = api._ohlcv_request(market, "5m", None, 12, {})
+    assert req["res"] == "5m"
     assert req["to"] == 1735689600
-    assert req["from"] == 1735689600 - 3600
+    assert req["from"] == 1735689600 - 11 * 300
 
 
-def test_fetch_ohlcv(api):
+def candle(ts: int, o, h, low, c, v) -> dict:
+    return {"open": o, "close": c, "low": str(low), "high": str(h), "volume": str(v), "ts": ts}
+
+
+def test_fetch_ohlcv_aggregates_30m(api):
+    base = 1735689600
     calls = mock_fetch(
         api,
         {
             "GET mkt/candles/": [
-                {
-                    "open": 1019.0,
-                    "close": 1020.0,
-                    "low": "1017.5",
-                    "high": "1023",
-                    "volume": "1.4852",
-                    "ts": 1735689600.0,
-                    "resolution": "1h",
-                    "time": 1735689600000,
-                }
+                candle(base, 10.0, 12, 9, 11.0, 1),
+                candle(base + 1800, 11.0, 15, 10, 14.0, 2),
+                candle(base + 3600, 14.0, 14, 8, 9.0, 3),
+                # Current, incomplete hour
+                candle(base + 7200, 9.0, 10, 9, 10.0, 1),
             ]
         },
     )
-    res = api.fetch_ohlcv("BTC/USDT", "1h", since=1735689600000, limit=2)
-    assert res == [[1735689600000, 1019.0, 1023.0, 1017.5, 1020.0, 1.4852]]
+    res = api.fetch_ohlcv("BTC/USDT", "1h", since=base * 1000, limit=3)
+    assert res == [
+        [base * 1000, 10.0, 15.0, 9.0, 14.0, 3.0],
+        [(base + 3600) * 1000, 14.0, 14.0, 8.0, 9.0, 3.0],
+        [(base + 7200) * 1000, 9.0, 10.0, 9.0, 10.0, 1.0],
+    ]
+    assert "res=30m" in calls[0]["url"]
     assert "symbol=BTC_USDT" in calls[0]["url"]
     assert "Authorization" not in calls[0]["headers"]
+
+
+def test_fetch_ohlcv_native_timeframe(api):
+    mock_fetch(api, {"GET mkt/candles/": [candle(1735689600, 1019.0, 1023, 1017.5, 1020.0, 1.5)]})
+    res = api.fetch_ohlcv("BTC/USDT", "15m", since=1735689600000, limit=2)
+    assert res == [[1735689600000, 1019.0, 1023.0, 1017.5, 1020.0, 1.5]]
+
+
+def test_aggregate_ohlcv_daily():
+    day = 86_400_000
+    half_hour = 1_800_000
+    candles = [[day + i * half_hour, 1.0 + i, 2.0 + i, 0.5, 1.5 + i, 1.0] for i in range(48)]
+    candles.append([2 * day, 5.0, 6.0, 4.0, 5.5, 2.0])
+    res = ccxt_bitpin.BitpinBase._aggregate_ohlcv(candles, day)
+    assert res == [[day, 1.0, 49.0, 0.5, 48.5, 48.0], [2 * day, 5.0, 6.0, 4.0, 5.5, 2.0]]
 
 
 def test_fetch_ticker_adds_orderbook(api):
