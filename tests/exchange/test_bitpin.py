@@ -417,10 +417,21 @@ def test_fetch_my_trades(api, time_machine):
     assert trades[0]["amount"] == 63.0
 
 
-def test_parse_trading_fees(api):
-    fees = api.parse_trading_fees([{"market": 1, "symbol": "BTC_USDT", "maker": 0.3, "taker": 0.4}])
-    assert fees["BTC/USDT"]["maker"] == 0.003
-    assert fees["BTC/USDT"]["taker"] == 0.004
+@pytest.mark.parametrize(
+    "maker,taker",
+    [
+        # Live API returns fractions
+        (0.0025, 0.003),
+        # Docs show percentages
+        (0.25, 0.3),
+    ],
+)
+def test_parse_trading_fees(api, maker, taker):
+    fees = api.parse_trading_fees(
+        [{"market": 1, "symbol": "BTC_USDT", "maker": maker, "taker": taker}]
+    )
+    assert fees["BTC/USDT"]["maker"] == 0.0025
+    assert fees["BTC/USDT"]["taker"] == 0.003
 
 
 @pytest.mark.parametrize(

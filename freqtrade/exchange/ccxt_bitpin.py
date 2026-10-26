@@ -158,8 +158,8 @@ class BitpinBase(_MixinBase):
                         "tierBased": False,
                         "percentage": True,
                         # Defaults - the real per-market fees are available via fetch_trading_fees
-                        "maker": self.parse_number("0.003"),
-                        "taker": self.parse_number("0.004"),
+                        "maker": self.parse_number("0.0025"),
+                        "taker": self.parse_number("0.003"),
                     },
                 },
                 "options": {
@@ -567,20 +567,26 @@ class BitpinBase(_MixinBase):
             result[code] = account
         return self.safe_balance(result)
 
+    def _parse_fee_rate(self, rate: str | None):
+        """
+        The docs show percentages (0.3 == 0.3%), while the live API returns fractions
+        (0.0025 == 0.25%). Spot fees are never above 5%, so larger values are percentages.
+        """
+        if rate is None:
+            return None
+        if Precise.string_gt(rate, "0.05"):
+            rate = Precise.string_div(rate, "100")
+        return self.parse_number(rate)
+
     def parse_trading_fees(self, response: list) -> dict:
         result: dict[str, Any] = {}
         for entry in response:
             market = self.safe_market(self.safe_string(entry, "symbol"))
-            # Bitpin returns percentages (0.3 == 0.3%)
             result[market["symbol"]] = {
                 "info": entry,
                 "symbol": market["symbol"],
-                "maker": self.parse_number(
-                    Precise.string_div(self.safe_string(entry, "maker"), "100")
-                ),
-                "taker": self.parse_number(
-                    Precise.string_div(self.safe_string(entry, "taker"), "100")
-                ),
+                "maker": self._parse_fee_rate(self.safe_string(entry, "maker")),
+                "taker": self._parse_fee_rate(self.safe_string(entry, "taker")),
                 "percentage": True,
                 "tierBased": False,
             }
