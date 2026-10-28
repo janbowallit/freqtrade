@@ -1,0 +1,31 @@
+# Runs on the server in /opt/freqtrade-bitpin. Secrets come from bot.env (mode 600);
+# .env only sets IMAGE_TAG (written by deploy.sh).
+services:
+  freqtrade:
+    image: freqtrade-bitpin:${IMAGE_TAG:?set IMAGE_TAG}
+    container_name: freqtrade-bitpin
+    restart: unless-stopped
+    env_file: bot.env
+    environment:
+      # Listen on all interfaces inside the container; the host side stays on loopback.
+      FREQTRADE__API_SERVER__LISTEN_IP_ADDRESS: 0.0.0.0
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      # FreqUI is synced by deploy.sh, so UI updates don't need a new image.
+      - ./ui:/freqtrade/freqtrade/rpc/api_server/ui/installed:ro
+    ports:
+      - "127.0.0.1:8091:8091"
+    command: >
+      trade
+      --config user_data/config_bitpin.json
+      --logfile user_data/logs/freqtrade.log
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 700m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
