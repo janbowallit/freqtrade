@@ -544,6 +544,29 @@ Spot trading on both `IRT` (Toman) and `USDT` markets is supported.
 * Default fees of 0.25% (maker) / 0.3% (taker) are assumed for dry-run. Set `"fee"` in the configuration to match your account's fee tier.
 * The API host defaults to `api.bitpin.org`. Use `"ccxt_config": {"hostname": "api.bitpin.ir"}` to switch hosts.
 
+## Nobitex
+
+Nobitex is not part of ccxt - freqtrade ships its own ccxt-compatible implementation (`freqtrade/exchange/ccxt_nobitex.py`).
+Spot trading on both `RLS` (Rial) and `USDT` markets is supported.
+
+``` json
+"exchange": {
+    "name": "nobitex",
+    "key": "your_public_key",
+    "secret": "your_private_key",
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT"]
+}
+```
+
+* Create an API key with the `READ` and `TRADE` permissions. `key` is the public key, `secret` the Ed25519 private key (URL-safe base64) - every private request is signed with it, so there are no tokens to refresh.
+* Nobitex calls its Rial markets `...IRT`, but prices and the wallet are in Rial - freqtrade shows them as e.g. `BTC/RLS`, with `RLS` as the stake currency.
+* Requests are signed with the current time, which must be within 30 seconds of Nobitex's clock - keep the system clock in sync (NTP).
+* More than 100 badly signed requests within 30 minutes block the IP for 30 minutes. Double-check the keys before starting the bot.
+* Candles of 1h and above are aligned to Tehran time (they open at hh:30 UTC). Freqtrade needs UTC-aligned candles, so each hourly candle is moved to the next full UTC hour (17:30-18:30 becomes the 18:00 candle), and 2h-1d candles are built from those. Strategies therefore see every 1h+ candle 30 minutes after it closed - consistently in backtesting and live, without look-ahead.
+* Minute candles (1m-30m) are UTC-aligned, but Nobitex only keeps about a week of them - long backtests need 1h or larger timeframes.
+* Order placement is limited to 300 requests per 10 minutes (shared with margin orders), the order list to 30 per minute. Keep the number of pairs and open orders low.
+* Fees of the lowest volume tier are used (Rial markets 0.25% / 0.25%, USDT markets 0.1% maker / 0.13% taker). Set `"fee"` in the configuration to match your account's fee tier.
+
 ## All exchanges
 
 Should you experience constant errors with Nonce (like `InvalidNonce`), it is best to regenerate the API keys. Resetting Nonce is difficult and it's usually easier to regenerate the API keys.
