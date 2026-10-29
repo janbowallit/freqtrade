@@ -29,3 +29,37 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  # Second bot: Nobitex, same image. Secrets come from nobitex.env (mode 600).
+  nobitex:
+    image: freqtrade-bitpin:${IMAGE_TAG:?set IMAGE_TAG}
+    container_name: freqtrade-nobitex
+    restart: unless-stopped
+    env_file: nobitex.env
+    environment:
+      FREQTRADE__API_SERVER__LISTEN_IP_ADDRESS: 0.0.0.0
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ./ui:/freqtrade/freqtrade/rpc/api_server/ui/installed:ro
+    ports:
+      - "127.0.0.1:8093:8093"
+    command: >
+      trade
+      --config user_data/config_nobitex.json
+      --logfile user_data/logs/nobitex.log
+    # The image's healthcheck pings the Bitpin port
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:8093/api/v1/ping"]
+      interval: 1m
+      timeout: 10s
+      start_period: 2m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 500m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
