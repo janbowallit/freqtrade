@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from freqtrade.enums import RunMode
+from freqtrade.exchange import timeframe_to_prev_date
 
 
 if TYPE_CHECKING:
@@ -74,7 +75,10 @@ def save_entry_snapshot(
             return
 
         df, _ = strategy.dp.get_analyzed_dataframe(pair, strategy.timeframe)
-        candles = df.loc[df["date"] <= trade.open_date_utc] if len(df) else df
+        # The signal came from the last candle that had closed when the order was placed.
+        # The fill can be seen candles later, so the newest candle is not necessarily it.
+        order_candle = timeframe_to_prev_date(strategy.timeframe, trade.open_date_utc)
+        candles = df.loc[df["date"] < order_candle] if len(df) else df
         if candles.empty:
             logger.warning(f"No candle for the entry snapshot of {pair} (trade {trade.id}).")
             return

@@ -41,9 +41,9 @@ def test_build_entry_snapshot():
     }
 
 
-def _strategy(runmode: RunMode, candle_dates: list[datetime]) -> MagicMock:
+def _strategy(runmode: RunMode, candle_dates: list[datetime], timeframe="1h") -> MagicMock:
     strategy = MagicMock()
-    strategy.timeframe = "1h"
+    strategy.timeframe = timeframe
     strategy.dp.runmode = runmode
     df = pd.DataFrame([_row(date=pd.Timestamp(d)) for d in candle_dates])
     strategy.dp.get_analyzed_dataframe.return_value = (df, candle_dates[-1])
@@ -66,17 +66,33 @@ def _order() -> MagicMock:
     return order
 
 
+def _hour(h: int, m: int = 0, s: int = 0) -> datetime:
+    return datetime(2026, 10, 30, h, m, s, tzinfo=UTC)
+
+
 def test_save_entry_snapshot_saves_signal_candle():
-    strategy = _strategy(RunMode.DRY_RUN, [CANDLE, datetime(2026, 10, 30, 13, 0, tzinfo=UTC)])
-    trade = _trade(datetime(2026, 10, 30, 12, 30, tzinfo=UTC))
+    # Order placed at 12:30 inside the 12:00 candle: the signal came from the closed 11:00 candle
+    strategy = _strategy(RunMode.DRY_RUN, [_hour(11), _hour(12), _hour(13)])
+    trade = _trade(_hour(12, 30))
 
     save_entry_snapshot(strategy, "BTC/USDT", trade, _order(), ["close"])
 
     trade.set_custom_data.assert_called_once()
     key, snapshot = trade.set_custom_data.call_args[0]
     assert key == "entry_snapshot"
-    assert snapshot["candle"] == "2026-10-30T12:00:00+00:00"
+    assert snapshot["candle"] == "2026-10-30T11:00:00+00:00"
     assert snapshot["values"] == {"close": 1.5}
+
+
+def test_save_entry_snapshot_late_fill_keeps_signal_candle():
+    # 15m limit order placed at 12:00:05, fill seen at 12:15 when the 12:00 candle has closed
+    strategy = _strategy(RunMode.LIVE, [_hour(11, 30), _hour(11, 45), _hour(12)], timeframe="15m")
+    trade = _trade(_hour(12, 0, 5))
+
+    save_entry_snapshot(strategy, "BTC/USDT", trade, _order(), ["close"])
+
+    _, snapshot = trade.set_custom_data.call_args[0]
+    assert snapshot["candle"] == "2026-10-30T11:45:00+00:00"
 
 
 def test_save_entry_snapshot_no_candle(caplog):
