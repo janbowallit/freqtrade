@@ -129,6 +129,18 @@ def client_patch(client: TestClient, url, data=None):
     )
 
 
+def client_put(client: TestClient, url, data=None):
+    return client.put(
+        url,
+        json=data or {},
+        headers={
+            "Authorization": _basic_auth_str(_TEST_USER, _TEST_PASS),
+            "Origin": "http://example.com",
+            "content-type": "application/json",
+        },
+    )
+
+
 def client_get(client: TestClient, url):
     # Add fake Origin to ensure CORS kicks in
     return client.get(
@@ -993,6 +1005,76 @@ def test_api_custom_data_open_trades_missing_key(botclient, fee):
     rc = client_get(client, f"{BASE_URI}/trades/open/custom-data?key=missing_key")
     assert_response(rc)
     assert rc.json() == []
+
+
+def _journal_setup(fee):
+    Trade.reset_trades()
+    CustomDataWrapper.reset_custom_data()
+    create_mock_trades_usdt(fee, use_db=True)
+    return Trade.get_trades_proxy()[0]
+
+
+def test_api_journal_save_and_list(botclient, fee):
+    trade1 = _journal_setup(fee)
+    _, client = botclient
+
+    rc = client_put(
+        client, f"{BASE_URI}/trades/{trade1.id}/journal", {"note": "late entry", "tags": ["fomo"]}
+    )
+    assert_response(rc)
+    assert rc.json()["trade_id"] == trade1.id
+    assert rc.json()["note"] == "late entry"
+    assert rc.json()["tags"] == ["fomo"]
+
+    rc = client_get(client, f"{BASE_URI}/trades/journal")
+    assert_response(rc)
+    journal = rc.json()
+    assert list(journal) == [str(trade1.id)]
+    assert journal[str(trade1.id)]["note"] == "late entry"
+    assert journal[str(trade1.id)]["tags"] == ["fomo"]
+    assert trade1.get_custom_data("journal_note") == "late entry"
+
+
+def test_api_journal_empty_deletes(botclient, fee):
+    trade1 = _journal_setup(fee)
+    _, client = botclient
+    url = f"{BASE_URI}/trades/{trade1.id}/journal"
+
+    assert_response(client_put(client, url, {"note": "late entry", "tags": ["fomo"]}))
+    rc = client_put(client, url, {"note": "", "tags": []})
+    assert_response(rc)
+
+    assert trade1.get_custom_data_entry("journal_note") is None
+    assert trade1.get_custom_data_entry("journal_tags") is None
+    rc = client_get(client, f"{BASE_URI}/trades/journal")
+    assert_response(rc)
+    assert rc.json() == {}
+
+
+def test_api_journal_limits(botclient, fee):
+    trade1 = _journal_setup(fee)
+    _, client = botclient
+
+    rc = client_put(client, f"{BASE_URI}/trades/{trade1.id}/journal", {"note": "x" * 2001})
+    assert rc.status_code == 400
+    assert trade1.get_custom_data_entry("journal_note") is None
+
+
+def test_api_journal_unknown_trade(botclient, fee):
+    _journal_setup(fee)
+    _, client = botclient
+
+    rc = client_put(client, f"{BASE_URI}/trades/999/journal", {"note": "hi"})
+    assert rc.status_code == 404
+
+
+def test_api_journal_keeps_strategy_data(botclient, fee):
+    trade1 = _journal_setup(fee)
+    trade1.set_custom_data("entry_snapshot", {"v": 1})
+    _, client = botclient
+
+    assert_response(client_put(client, f"{BASE_URI}/trades/{trade1.id}/journal", {"note": "hi"}))
+    assert trade1.get_custom_data("entry_snapshot") == {"v": 1}
 
 
 @pytest.mark.usefixtures("init_persistence")

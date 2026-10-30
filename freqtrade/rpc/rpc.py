@@ -44,9 +44,16 @@ from freqtrade.exchange.exchange_utils import price_to_precision
 from freqtrade.ft_types import AnnotationType
 from freqtrade.loggers import bufferHandler
 from freqtrade.persistence import CustomDataWrapper, KeyValueStore, Order, PairLocks, Trade
+from freqtrade.persistence.custom_data import _CustomData
 from freqtrade.persistence.models import PairLock, custom_data_rpc_wrapper
 from freqtrade.plugins.pairlist.pairlist_helpers import expand_pairlist
 from freqtrade.rpc.fiat_convert import CryptoToFiatConverter
+from freqtrade.rpc.journal import (
+    JOURNAL_KEYS,
+    JOURNAL_NOTE_KEY,
+    JOURNAL_TAGS_KEY,
+    normalize_journal,
+)
 from freqtrade.rpc.rpc_types import RPCSendMsg
 from freqtrade.util import (
     decimals_per_coin,
@@ -1351,6 +1358,63 @@ class RPC:
                 results.append({"trade_id": trade.id, "custom_data": formatted_custom_data})
 
         return results
+
+    @custom_data_rpc_wrapper
+    def _rpc_set_journal(self, trade_id: int, note: str, tags: list[str]) -> dict[str, Any]:
+        """
+        Save the journal note and tags of a trade as custom data.
+        An empty note or an empty tag list deletes that entry.
+        :raises RPCException: when the trade does not exist
+        :raises ValueError: when the note or the tags break a limit
+        """
+        trade = Trade.get_trades(trade_filter=[Trade.id == trade_id]).first()
+        if not trade:
+            raise RPCException(f"No trade found for trade_id: {trade_id}")
+        note, tags = normalize_journal(note, tags)
+
+        for key, value in ((JOURNAL_NOTE_KEY, note), (JOURNAL_TAGS_KEY, tags)):
+            if value:
+                trade.set_custom_data(key, value)
+            else:
+                trade.delete_custom_data(key)
+
+        return {
+            "trade_id": trade.id,
+            "note": note,
+            "tags": tags,
+            "updated_at": self._journal_updated_at(trade.get_all_custom_data()),
+        }
+
+    @custom_data_rpc_wrapper
+    def _rpc_list_journal(self) -> dict[int, dict[str, Any]]:
+        """
+        Journal note and tags of every trade that has any, keyed by trade id.
+        """
+        rows = _CustomData.session.scalars(
+            select(_CustomData).filter(_CustomData.cd_key.in_(JOURNAL_KEYS))
+        ).all()
+
+        by_trade: dict[int, list] = {}
+        for row in rows:
+            by_trade.setdefault(row.ft_trade_id, []).append(row)
+
+        result: dict[int, dict[str, Any]] = {}
+        for trade_id, trade_rows in by_trade.items():
+            values = {
+                row.cd_key: CustomDataWrapper._convert_custom_data(row).value for row in trade_rows
+            }
+            result[trade_id] = {
+                "trade_id": trade_id,
+                "note": values.get(JOURNAL_NOTE_KEY, ""),
+                "tags": values.get(JOURNAL_TAGS_KEY, []),
+                "updated_at": self._journal_updated_at(trade_rows),
+            }
+        return result
+
+    @staticmethod
+    def _journal_updated_at(rows: Sequence[Any]) -> datetime | None:
+        times = [row.updated_at or row.created_at for row in rows if row.cd_key in JOURNAL_KEYS]
+        return max(times) if times else None
 
     def _rpc_performance(self) -> list[dict[str, Any]]:
         """

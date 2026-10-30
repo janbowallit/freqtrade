@@ -18,6 +18,8 @@ from freqtrade.rpc.api_server.api_schemas import (
     ForceEnterPayload,
     ForceEnterResponse,
     ForceExitPayload,
+    JournalEntry,
+    JournalUpdate,
     ListCustomData,
     Locks,
     LocksPayload,
@@ -227,6 +229,27 @@ def list_custom_data(trade_id: int, key: str | None = Query(None), rpc: RPC = De
     """
     try:
         return rpc._rpc_list_custom_data(trade_id, key=key)
+    except RPCException as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/trades/journal", response_model=dict[int, JournalEntry], tags=["Trades"])
+def list_journal(rpc: RPC = Depends(get_rpc)):
+    """
+    Journal notes and tags of every trade that has any, keyed by trade id.
+    """
+    return rpc._rpc_list_journal()
+
+
+@router.put("/trades/{tradeid}/journal", response_model=JournalEntry, tags=["Trades"])
+def set_journal(tradeid: int, payload: JournalUpdate, rpc: RPC = Depends(get_rpc)):
+    """
+    Save the journal note and tags of a trade. An empty note or tag list removes it.
+    """
+    try:
+        return rpc._rpc_set_journal(tradeid, payload.note, payload.tags)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except RPCException as e:
         raise HTTPException(status_code=404, detail=str(e))
 
