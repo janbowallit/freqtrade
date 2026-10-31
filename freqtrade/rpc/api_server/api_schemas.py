@@ -870,3 +870,15 @@ class CustomDataEntry(BaseModel):
 class ListCustomData(BaseModel):
     trade_id: int
     custom_data: list[CustomDataEntry]
+
+
+class JournalUpdate(BaseModel):
+    note: str = ""
+    tags: list[str] = []
+
+
+class JournalEntry(BaseModel):
+    trade_id: int
+    note: str
+    tags: list[str]
+    updated_at: datetime | None = None
